@@ -1,0 +1,2 @@
+backend/venv/lib/python3.12/site-packages/pyspark/jars/rocksdbjni-8.3.2.jar filter=lfs diff=lfs merge=lfs -text
+spark-3.5.5-bin-hadoop3.tgz filter=lfs diff=lfs merge=lfs -text

@@ -56,7 +56,13 @@ def get_sample_data():
         if table_format == "delta":
             df = metadata_reader.spark.read.format("delta").load(path)
         elif table_format == "iceberg":
-            df = metadata_reader.spark.read.format("iceberg").load(path)
+            try:
+                # First try to read as native iceberg format
+                df = metadata_reader.spark.read.format("iceberg").load(path)
+            except Exception:
+                # If that fails, try the data directory
+                data_path = os.path.join(path, "data")
+                df = metadata_reader.spark.read.parquet(data_path)
         elif table_format == "hudi":
             df = metadata_reader.spark.read.format("hudi").load(path)
         else:
@@ -73,5 +79,11 @@ def get_sample_data():
 def health_check():
     return jsonify({"status": "healthy"})
 
+# Add a root route for easy health check
+@app.route('/', methods=['GET'])
+def root():
+    return jsonify({"message": "API is running", "status": "healthy"})
+
 if __name__ == '__main__':
+    # Explicitly bind to all interfaces to make sure it's accessible from outside
     app.run(host='0.0.0.0', port=5000)

@@ -73,8 +73,12 @@ class MetadataReader:
 
     def detect_table_format(self, path: str) -> str:
         """Detect the table format based on the path contents."""
-        if path.endswith("parquet"):
-            return True
+        if path.endswith(".parquet"):
+            return "parquet"
+        # Check for specific path patterns for Iceberg
+        if path.endswith(".iceberg") or ".iceberg/" in path:
+            return "iceberg"
+        # Check for directory markers
         if os.path.exists(os.path.join(path, "_delta_log")):
             return "delta"
         elif os.path.exists(os.path.join(path, "metadata")):
@@ -127,17 +131,35 @@ class MetadataReader:
 
     def _get_iceberg_metadata(self, path: str) -> Dict[str, Any]:
         """Get Iceberg table metadata."""
-        df = self.spark.read.format("iceberg").load(path)
+        try:
+            # First attempt to read directly as iceberg format
+            df = self.spark.read.format("iceberg").load(path)
+        except Exception as e:
+            # If that fails, try to load from the data subdirectory
+            try:
+                data_path = os.path.join(path, "data")
+                df = self.spark.read.parquet(data_path)
+            except Exception as nested_e:
+                # If both fail, raise the original error
+                raise ValueError(f"Failed to read Iceberg table: {str(e)}. Also tried data subdirectory: {str(nested_e)}")
+        
+        # Try to find metadata path
         metadata_path = os.path.join(path, "metadata")
         
         # Get the latest metadata.json
-        metadata_files = glob.glob(os.path.join(metadata_path, "*.metadata.json"))
+        metadata_files = []
+        if os.path.exists(metadata_path):
+            metadata_files = glob.glob(os.path.join(metadata_path, "*.metadata.json"))
+        
         latest_metadata = max(metadata_files, key=os.path.getctime) if metadata_files else None
         
         metadata = {}
         if latest_metadata:
-            with open(latest_metadata, 'r') as f:
-                metadata = json.load(f)
+            try:
+                with open(latest_metadata, 'r') as f:
+                    metadata = json.load(f)
+            except Exception as e:
+                print(f"Warning: Could not parse metadata file {latest_metadata}: {str(e)}")
 
         return {
             "format": "iceberg",

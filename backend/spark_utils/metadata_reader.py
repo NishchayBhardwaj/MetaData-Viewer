@@ -20,15 +20,61 @@ class MetadataReader:
             .config("spark.hadoop.fs.s3a.access.key", os.getenv('AWS_ACCESS_KEY_ID')) \
             .config("spark.hadoop.fs.s3a.secret.key", os.getenv('AWS_SECRET_ACCESS_KEY')) \
             .config("spark.hadoop.fs.s3a.endpoint", f"s3.{os.getenv('AWS_REGION')}.amazonaws.com") \
+            .config("spark.hadoop.fs.s3a.aws.credentials.provider", "org.apache.hadoop.fs.s3a.SimpleAWSCredentialsProvider") \
+            .config("spark.hadoop.fs.s3a.path.style.access", "true") \
+            .config("spark.hadoop.fs.s3a.impl.disable.cache", "true") \
             .config("spark.jars.packages", 
                    "org.apache.hadoop:hadoop-aws:3.3.4,"
+                   "com.amazonaws:aws-java-sdk-bundle:1.12.367,"
+                   "org.apache.hadoop:hadoop-client:3.3.4,"
+                   "org.apache.hadoop:hadoop-common:3.3.4,"
                    "io.delta:delta-core_2.12:2.4.0,"
                    "org.apache.iceberg:iceberg-spark-runtime-3.4_2.12:1.4.3,"
-                   "org.apache.hudi:hudi-spark3.4-bundle_2.12:0.14.0") \
+                   "org.apache.hudi:hudi-spark3.4-bundle_2.12:0.14.0,"
+                   "com.fasterxml.jackson.core:jackson-core:2.15.2,"
+                   "com.fasterxml.jackson.core:jackson-databind:2.15.2,"
+                   "com.fasterxml.jackson.core:jackson-annotations:2.15.2,"
+                   "com.fasterxml.jackson.module:jackson-module-scala_2.12:2.15.2") \
+            .config("spark.jars.excludes", 
+                   "com.fasterxml.jackson.core:jackson-databind,"
+                   "com.fasterxml.jackson.core:jackson-core,"
+                   "com.fasterxml.jackson.core:jackson-annotations,"
+                   "com.fasterxml.jackson.module:jackson-module-scala_2.12") \
+            .config("spark.sql.legacy.parquet.datetimeRebaseModeInWrite", "CORRECTED") \
+            .config("spark.sql.legacy.parquet.datetimeRebaseModeInRead", "CORRECTED") \
+            .config("spark.sql.legacy.parquet.int96RebaseModeInWrite", "CORRECTED") \
+            .config("spark.sql.legacy.parquet.int96RebaseModeInRead", "CORRECTED") \
             .getOrCreate()
+
+    def _is_valid_table_path(self, path: str) -> bool:
+        """Check if the path contains valid table files."""
+        # First check if the path itself is a parquet file
+        if path.endswith('.parquet'):
+            return True   
+        # Check for common table format indicators
+        if os.path.exists(os.path.join(path, "_delta_log")):
+            return True
+        if os.path.exists(os.path.join(path, "metadata")):
+            return True
+        if os.path.exists(os.path.join(path, ".hoodie")):
+            return True
+            
+        # Check for parquet files in the directory
+        try:
+            # Try to read the path as a parquet file/directory
+            self.spark.read.parquet(path).limit(1)
+            return True
+        except Exception:
+            # If reading fails, check for parquet files in the directory
+            parquet_files = glob.glob(os.path.join(path, "**/*.parquet"), recursive=True)
+            return len(parquet_files) > 0
+            
+        return False
 
     def detect_table_format(self, path: str) -> str:
         """Detect the table format based on the path contents."""
+        if path.endswith("parquet"):
+            return True
         if os.path.exists(os.path.join(path, "_delta_log")):
             return "delta"
         elif os.path.exists(os.path.join(path, "metadata")):

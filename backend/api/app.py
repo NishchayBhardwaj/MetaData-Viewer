@@ -1,3 +1,7 @@
+import sys
+import os
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from spark_utils.metadata_reader import MetadataReader
@@ -23,8 +27,11 @@ def get_metadata():
         # Replace s3:// with s3a:// for Spark
         path = path.replace('s3://', 's3a://')
         
-        metadata = metadata_reader.get_table_metadata(path)
-        return jsonify(metadata)
+        try:
+            metadata = metadata_reader.get_table_metadata(path)
+            return jsonify(metadata)
+        except ValueError as ve:
+            return jsonify({"error": str(ve)}), 400
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500

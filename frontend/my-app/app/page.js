@@ -1,5 +1,12 @@
-'use client';
+"use client";
 import { useState } from 'react';
+import { useRouter } from 'next/navigation';
+import Header from './components/Header';
+import S3PathInput from './components/S3PathInput';
+import MetadataPanel from './components/MetadataPanel';
+import SampleDataTable from './components/SampleDataTable';
+import ErrorAlert from './components/ErrorAlert';
+import Footer from './components/Footer';
 
 export default function Home() {
   const [path, setPath] = useState('');
@@ -7,24 +14,35 @@ export default function Home() {
   const [sampleData, setSampleData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const router = useRouter();
+
+  const cleanPath = (inputPath) => {
+    // Remove trailing slash if present
+    return inputPath.endsWith('/') ? inputPath.slice(0, -1) : inputPath;
+  };
 
   const fetchMetadata = async () => {
     try {
       setLoading(true);
       setError(null);
+      
+      // Clean the path before sending
+      const cleanedPath = cleanPath(path);
+      
       const response = await fetch('http://localhost:5000/api/metadata', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ path }),
+        body: JSON.stringify({ path: cleanedPath }),
       });
       
+      const data = await response.json();
+      
       if (!response.ok) {
-        throw new Error('Failed to fetch metadata');
+        throw new Error(data.error || 'Failed to fetch metadata');
       }
       
-      const data = await response.json();
       setMetadata(data);
       
       // Fetch sample data after getting metadata
@@ -33,15 +51,18 @@ export default function Home() {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ path, limit: 10 }),
+        body: JSON.stringify({ path: cleanedPath, limit: 10 }),
       });
       
+      const sampleData = await sampleResponse.json();
+      
       if (!sampleResponse.ok) {
-        throw new Error('Failed to fetch sample data');
+        throw new Error(sampleData.error || 'Failed to fetch sample data');
       }
       
-      const sampleData = await sampleResponse.json();
       setSampleData(sampleData.data);
+      // Redirect to details page with state (or use a global store, or query params)
+      router.push(`/details?meta=${encodeURIComponent(JSON.stringify(data))}&sample=${encodeURIComponent(JSON.stringify(sampleData.data))}`);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -50,163 +71,48 @@ export default function Home() {
   };
 
   return (
-    <div className="min-h-screen p-8 bg-gray-50">
-      <main className="max-w-6xl mx-auto">
-        <h1 className="text-3xl font-bold mb-8">Lakehouse Metadata Viewer</h1>
-        
-        <div className="bg-white rounded-lg shadow p-6 mb-6">
-          <div className="flex gap-4">
-            <input
-              type="text"
-              value={path}
-              onChange={(e) => setPath(e.target.value)}
-              placeholder="Enter S3 path (e.g., s3://bucket/path)"
-              className="flex-1 p-2 border rounded"
-            />
-            <button
-              onClick={fetchMetadata}
-              disabled={loading || !path}
-              className="px-4 py-2 bg-blue-500 text-black rounded hover:bg-blue-600 disabled:bg-gray-400"
-            >
-              {loading ? 'Loading...' : 'Fetch Metadata'}
-            </button>
-          </div>
-          
-          {error && (
-            <div className="mt-4 p-4 bg-red-100 text-red-700 rounded">
-              {error}
-            </div>
-          )}
+    <div className="min-h-screen flex flex-col bg-black">
+      <Header />
+      <main className="flex-1 max-w-6xl mx-auto w-full px-4 py-10">
+        <div className="flex flex-col items-center mb-10 animate-fade-in-up transition-all duration-700">
+          <h1 className="text-5xl font-extrabold text-white mb-4 tracking-tight drop-shadow-lg">MetaData Viewer</h1>
+          <p className="text-lg text-gray-300 max-w-2xl text-center mb-2">A comprehensive tool for visualizing and analyzing metadata from S3 buckets. Explore advanced visualization tools and AI-powered query assistants.</p>
         </div>
-
+        <div className="animate-pulse-infinite">
+          <S3PathInput
+            value={path}
+            onChange={e => setPath(e.target.value)}
+            onFetch={fetchMetadata}
+            loading={loading}
+            disabled={!path}
+          />
+        </div>
+        <ErrorAlert error={error} />
         {metadata && (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <div className="bg-white rounded-lg shadow p-6">
-              <h2 className="text-xl font-semibold mb-4">Table Metadata</h2>
-              
-              <div className="space-y-4">
-                <div>
-                  <h3 className="font-medium">Format</h3>
-                  <p className="text-gray-600">{metadata.format}</p>
-                </div>
-
-                <div>
-                  <h3 className="font-medium">Schema</h3>
-                  <div className="mt-2">
-                    {metadata.schema.columns.map((col, idx) => (
-                      <div key={idx} className="flex gap-4 text-sm">
-                        <span className="font-medium">{col.name}</span>
-                        <span className="text-gray-600">{col.type}</span>
-                        <span className="text-gray-500">{col.nullable ? 'nullable' : 'not null'}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                <div>
-                  <h3 className="font-medium">Statistics</h3>
-                  <div className="mt-2 grid grid-cols-3 gap-4">
-                    <div>
-                      <span className="text-gray-600">Row Count: </span>
-                      <span className="font-medium">{metadata.statistics.row_count}</span>
-                    </div>
-                    <div>
-                      <span className="text-gray-600">File Count: </span>
-                      <span className="font-medium">{metadata.statistics.file_count}</span>
-                    </div>
-                    <div>
-                      <span className="text-gray-600">Total Size: </span>
-                      <span className="font-medium">{(metadata.statistics.total_size / 1024 / 1024).toFixed(2)} MB</span>
-                    </div>
-                  </div>
-                </div>
-
-                {metadata.format === 'delta' && (
-                  <div>
-                    <h3 className="font-medium">Delta Version</h3>
-                    <p className="text-gray-600">Version: {metadata.version.version}</p>
-                    <p className="text-gray-600">Last Modified: {metadata.version.last_modified}</p>
-                  </div>
-                )}
-
-                {metadata.format === 'iceberg' && (
-                  <div>
-                    <h3 className="font-medium">Snapshots</h3>
-                    <div className="mt-2">
-                      {metadata.snapshots.map((snapshot, idx) => (
-                        <div key={idx} className="text-sm">
-                          <span className="font-medium">Snapshot {snapshot.snapshot_id}</span>
-                          <span className="text-gray-600 ml-2">
-                            {new Date(snapshot.timestamp_ms).toLocaleString()}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {metadata.format === 'hudi' && (
-                  <div>
-                    <h3 className="font-medium">Timeline</h3>
-                    <div className="mt-2">
-                      <div className="text-sm">
-                        <span className="font-medium">Commits: </span>
-                        <span className="text-gray-600">{metadata.timeline.commits.length}</span>
-                      </div>
-                      <div className="text-sm">
-                        <span className="font-medium">Clean: </span>
-                        <span className="text-gray-600">{metadata.timeline.clean.length}</span>
-                      </div>
-                      <div className="text-sm">
-                        <span className="font-medium">Compaction: </span>
-                        <span className="text-gray-600">{metadata.timeline.compaction.length}</span>
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            <div className="bg-white rounded-lg shadow p-6">
-              <h2 className="text-xl font-semibold mb-4">Sample Data</h2>
-              {sampleData && sampleData.length > 0 ? (
-                <div className="overflow-x-auto">
-                  <table className="min-w-full divide-y divide-gray-200">
-                    <thead className="bg-gray-50">
-                      <tr>
-                        {Object.keys(sampleData[0]).map((header) => (
-                          <th
-                            key={header}
-                            className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
-                          >
-                            {header}
-                          </th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody className="bg-white divide-y divide-gray-200">
-                      {sampleData.map((row, idx) => (
-                        <tr key={idx}>
-                          {Object.values(row).map((value, cellIdx) => (
-                            <td
-                              key={cellIdx}
-                              className="px-6 py-4 whitespace-nowrap text-sm text-gray-500"
-                            >
-                              {value?.toString() ?? 'null'}
-                            </td>
-                          ))}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              ) : (
-                <p className="text-gray-500">No sample data available</p>
-              )}
-            </div>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mt-8">
+            <MetadataPanel metadata={metadata} />
+            <SampleDataTable sampleData={sampleData} />
           </div>
         )}
       </main>
+      <Footer />
+      <style jsx global>{`
+        @keyframes fade-in-up {
+          0% { opacity: 0; transform: translateY(40px); }
+          100% { opacity: 1; transform: translateY(0); }
+        }
+        .animate-fade-in-up {
+          animation: fade-in-up 1s cubic-bezier(0.23, 1, 0.32, 1) both;
+        }
+        @keyframes pulse-infinite {
+          0% { box-shadow: 0 0 0 0 rgba(59,130,246,0.7); }
+          70% { box-shadow: 0 0 0 10px rgba(59,130,246,0); }
+          100% { box-shadow: 0 0 0 0 rgba(59,130,246,0); }
+        }
+        .animate-pulse-infinite {
+          animation: pulse-infinite 2s infinite;
+        }
+      `}</style>
     </div>
   );
 }
